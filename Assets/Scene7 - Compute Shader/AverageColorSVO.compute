@@ -1,0 +1,21 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+struct SVONode {
+	int children[8];
+	float3 pos;
+	uint3 color;
+	uint pixelCount;
+};
+
+RWStructuredBuffer<SVONode> octree;
+int octreeSize;
+
+// Average the color of each node.
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+	uint pixelCount = octree[id.x].pixelCount;
+	// Prevent indexing out of bounds
+	if ((int)id.x >= octreeSize) return;
+	octree[id.x].color = octree[id.x].color / pixelCount;
+}

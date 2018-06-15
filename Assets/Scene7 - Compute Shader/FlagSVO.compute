@@ -1,0 +1,49 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+struct SVOPixelData {
+	float3 pos;
+	uint3 color;
+	int nodeIndex;
+};
+
+struct SVONode {
+	int children[8];
+	float3 pos;
+	uint3 color;
+	uint pixelCount;
+};
+
+RWStructuredBuffer<SVOPixelData> pixelData;
+RWStructuredBuffer<SVONode> octree;
+int octreeSize;
+
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+	// Traverse octree
+	float3 pixelPos = pixelData[id.x].pos;
+	int oldNodeIndex = pixelData[id.x].nodeIndex;
+	SVONode oldNode = octree[oldNodeIndex];
+	int childIndex = (pixelPos.z >= oldNode.pos.z) * 4 + (pixelPos.y >= oldNode.pos.y) * 2 + (pixelPos.x >= oldNode.pos.x);
+
+	// Continue traversing until at lowest level of octree
+	while (oldNode.children[childIndex] > 0) {
+		oldNodeIndex = oldNode.children[childIndex];
+		oldNode = octree[oldNodeIndex];
+		childIndex = (pixelPos.z >= oldNode.pos.z) * 4 + (pixelPos.y >= oldNode.pos.y) * 2 + (pixelPos.x >= oldNode.pos.x);
+	}
+
+	// Flag the child node
+	octree[oldNodeIndex].children[childIndex] = -1;
+
+	// Update the pixelData's nodeIndex
+	pixelData[id.x].nodeIndex = oldNodeIndex;
+
+	// Increment pixel count
+	InterlockedAdd(octree[oldNodeIndex].pixelCount, 1);
+
+	// Add color to node
+	InterlockedAdd(octree[oldNodeIndex].color.r, pixelData[id.x].color.r);
+	InterlockedAdd(octree[oldNodeIndex].color.g, pixelData[id.x].color.g);
+	InterlockedAdd(octree[oldNodeIndex].color.b, pixelData[id.x].color.b);
+}

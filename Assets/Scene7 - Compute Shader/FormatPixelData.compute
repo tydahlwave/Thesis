@@ -1,0 +1,55 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+struct SVOPixelData {
+	float3 pos;
+	uint3 color;
+	int nodeIndex;
+};
+
+RWStructuredBuffer<SVOPixelData> pixelData;
+
+Texture2DArray<float4> _ColorTexArray;
+Texture2DArray<float4> _DepthTexArray;
+float4x4 _VPArray[2];
+float4x4 _DVPArray[2];
+float4x4 _InverseVPArray[2];
+float4x4 _InverseDVPArray[2];
+
+// Convert pixel and depth data into structs for easier use by SVO.
+// To calculate the 3D position of a pixel, we have to unproject a pixel from the color
+// texture to the near plane, then project it into the depth map to acquire the depth value,
+// and then unproject again from the color texture using the correct depth value.
+// The same point may be located at a different pixel in the depth and color textures since
+// both textures were created using different view and projection matrices.
+[numthreads(8,8,1)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+	int dataIndex = (id.z * 1280 * 720) + (id.y * 1280) + id.x;
+	pixelData[dataIndex].color.x = (uint)(_ColorTexArray[id].x * 255.0);
+	pixelData[dataIndex].color.y = (uint)(_ColorTexArray[id].y * 255.0);
+	pixelData[dataIndex].color.z = (uint)(_ColorTexArray[id].z * 255.0);
+	//pixelData[dataIndex].color = _ColorTexArray[id] * 255.0f;
+	pixelData[dataIndex].nodeIndex = 0;
+
+	// Calculate position of color pixel on near plane
+	int tex = id.z;
+	int row = id.y;
+	int col = id.x;
+	// Use depth value of 0 to unproject point onto the near plane
+	float4 ndc = float4((col / (float)1280) * 2 - 1, (row / (float)720) * 2 - 1, 0, 1);
+	float4 worldPos = mul(_InverseVPArray[tex], ndc);
+	worldPos /= worldPos.w;
+
+	// Project into depth map to get depth value
+	worldPos.w = 1;
+	float4 ndc_depth = mul(_DVPArray[tex], worldPos);
+	ndc_depth /= ndc_depth.w;
+	uint3 depthPixelPos = uint3(ndc_depth.x * 1280, ndc_depth.y * 720, tex);
+	float depthValue = _DepthTexArray[depthPixelPos].r;
+
+	// Calculate the real position using depth value
+	ndc.z = 1-depthValue;
+	float4 realWorldPos = mul(_InverseVPArray[tex], ndc);
+	realWorldPos /= realWorldPos.w;
+	pixelData[dataIndex].pos = realWorldPos.xyz;
+}

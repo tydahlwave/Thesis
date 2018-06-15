@@ -1,0 +1,42 @@
+﻿// Each #kernel tells which function to compile; you can have many kernels
+#pragma kernel CSMain
+
+struct SVONode {
+	int children[8];
+	float3 pos;
+	uint3 color;
+	uint pixelCount;
+};
+
+RWStructuredBuffer<SVONode> octree;
+RWStructuredBuffer<uint> octreeMetadata;
+// [0] == lastLODIndex
+// [1] == lastNodeIndex
+// [2] == currentLOD
+int octreeSize;
+float currentVoxelSize;
+
+[numthreads(64,1,1)]
+void CSMain (uint3 id : SV_DispatchThreadID) {
+	int lastLODIndex = octreeMetadata[0];
+	uint nodeOffset = id.x / 8;
+	uint childIndex = id.x % 8;
+	int nodeIndex = lastLODIndex + nodeOffset;
+
+	// Do nothing if node is not flagged
+	if (octree[nodeIndex].children[childIndex] == 0) return;
+
+	// Get last node in octree and increment global counter
+	int lastNodeIndex;
+	InterlockedAdd(octreeMetadata[1], 1, lastNodeIndex);
+
+	// Set child node to the new node index
+	int newNodeIndex = lastNodeIndex + 1;
+	octree[nodeIndex].children[childIndex] = newNodeIndex;
+
+	// Update the new node's position
+	float newVoxelRadius = currentVoxelSize / 4.0;
+	octree[newNodeIndex].pos.z = octree[nodeIndex].pos.z + newVoxelRadius * ((int)(childIndex / 4) * 2 - 1);
+	octree[newNodeIndex].pos.y = octree[nodeIndex].pos.y + newVoxelRadius * ((int)((childIndex / 2) % 2) * 2 - 1);
+	octree[newNodeIndex].pos.x = octree[nodeIndex].pos.x + newVoxelRadius * ((int)(childIndex % 2) * 2 - 1);
+}
